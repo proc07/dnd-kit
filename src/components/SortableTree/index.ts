@@ -1,7 +1,7 @@
 export {SortableTree} from './SortableTree';
 export type {SortableTreeProps} from './SortableTree';
 export {initialTreeItems} from './constants';
-export type {TreeItem, TreeItems, FlattenedItem} from './types';
+export type {TreeItem, TreeItems, FlattenedItem, RenderItemParams} from './types';
 export {
   buildTree,
   flattenTree,

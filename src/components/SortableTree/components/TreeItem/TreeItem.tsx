@@ -6,8 +6,10 @@ import {Action} from '../Action';
 import {Handle} from '../Handle';
 import {Remove} from '../Remove';
 import styles from './TreeItem.module.css';
+import type {FlattenedItem, RenderItemParams} from '../../types';
 
-export interface Props extends Omit<HTMLAttributes<HTMLLIElement>, 'id'> {
+export interface Props<T = Record<string, any>> extends Omit<HTMLAttributes<HTMLLIElement>, 'id'> {
+  item?: FlattenedItem<T>;        // 当前节点完整数据对象
   childCount?: number;           // 子项总数 (拖拽时显示在徽标上)
   clone?: boolean;                // 是否为 DragOverlay 里的拖拽悬浮镜像
   collapsed?: boolean;            // 当前父节点是否已折叠
@@ -18,19 +20,21 @@ export interface Props extends Omit<HTMLAttributes<HTMLLIElement>, 'id'> {
   handleProps?: any;              // 拖拽手柄绑定的事件与属性
   indicator?: boolean;            // 是否显示指示线模式
   indentationWidth: number;       // 每一级缩进的像素宽度 (用于设置 CSS 变量 --spacing)
-  value: string;                  // 显示的文本内容
+  value?: string;                 // 显示的文本内容 (未传 renderItem 时默认使用)
+  renderItem?: (params: RenderItemParams<T>) => React.ReactNode; // ⭐️ 自定义 UI 渲染插槽函数
   onCollapse?(): void;            // 点击展开/折叠回调
   onRemove?(): void;              // 点击删除按钮回调
   wrapperRef?(node: HTMLLIElement | null): void; // 外层 li 容器的 ref
 }
 
 /**
- * ⭐️ TreeItem 纯 UI 渲染组件
- * 根据 depth 和 indentationWidth 计算左内边距 CSS 变量 `--spacing`，实现视觉上的多级缩进。
+ * ⭐️ TreeItem UI 渲染组件
+ * 支持默认官方 UI 渲染，更支持通过 renderItem 插槽完全自定义每一项的卡片样式与布局。
  */
-export const TreeItem = forwardRef<HTMLDivElement, Props>(
+export const TreeItem = forwardRef<HTMLDivElement, Props<any>>(
   (
     {
+      item,
       childCount,
       clone,
       depth,
@@ -41,6 +45,7 @@ export const TreeItem = forwardRef<HTMLDivElement, Props>(
       indentationWidth,
       indicator,
       collapsed,
+      renderItem,
       onCollapse,
       onRemove,
       style,
@@ -70,32 +75,57 @@ export const TreeItem = forwardRef<HTMLDivElement, Props>(
         {...props}
       >
         <div className={styles.TreeItem} ref={ref} style={style}>
-          {/* 拖拽手柄：绑定了 drag listeners */}
-          <Handle {...handleProps} />
+          {/* ⭐️ 如果外部传入了 renderItem，则交由外部完全自定义渲染 */}
+          {renderItem && item ? (
+            renderItem({
+              item,
+              depth,
+              indentationWidth,
+              isDragging: ghost,
+              isGhost: ghost,
+              isClone: clone,
+              childCount,
+              collapsed,
+              handleProps,
+              onCollapse,
+              onRemove,
+              Handle,
+              Action,
+              Remove,
+            })
+          ) : (
+            /* ⭐️ 否则回退为官方默认的 TreeItem 样式 */
+            <>
+              {/* 拖拽手柄：绑定了 drag listeners */}
+              <Handle {...handleProps} />
 
-          {/* 展开/收起按钮（仅在拥有子节点时呈现） */}
-          {onCollapse && (
-            <Action
-              onClick={onCollapse}
-              className={classNames(
-                styles.Collapse,
-                collapsed && styles.collapsed
+              {/* 展开/收起按钮（仅在拥有子节点时呈现） */}
+              {onCollapse && (
+                <Action
+                  onClick={onCollapse}
+                  className={classNames(
+                    styles.Collapse,
+                    collapsed && styles.collapsed
+                  )}
+                >
+                  {collapseIcon}
+                </Action>
               )}
-            >
-              {collapseIcon}
-            </Action>
+
+              {/* 节点文本 */}
+              <span className={styles.Text}>
+                {value ?? (item as any)?.title ?? (item as any)?.name ?? (item as any)?.value ?? String(item?.id ?? '')}
+              </span>
+
+              {/* 删除按钮（悬浮镜像中不显示） */}
+              {!clone && onRemove && <Remove onClick={onRemove} />}
+
+              {/* 拖拽悬浮镜像中：如果携带了子节点，右上角显示数字气泡 */}
+              {clone && childCount && childCount > 1 ? (
+                <span className={styles.Count}>{childCount}</span>
+              ) : null}
+            </>
           )}
-
-          {/* 节点文本 */}
-          <span className={styles.Text}>{value}</span>
-
-          {/* 删除按钮（悬浮镜像中不显示） */}
-          {!clone && onRemove && <Remove onClick={onRemove} />}
-
-          {/* 拖拽悬浮镜像中：如果携带了子节点，右上角显示数字气泡 */}
-          {clone && childCount && childCount > 1 ? (
-            <span className={styles.Count}>{childCount}</span>
-          ) : null}
         </div>
       </li>
     );

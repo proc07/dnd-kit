@@ -8,9 +8,11 @@ import {CSS} from '@dnd-kit/utilities';
 import {TreeItem} from './TreeItem';
 import type {Props as TreeItemProps} from './TreeItem';
 import {iOS} from '../../utilities';
+import type {FlattenedItem} from '../../types';
 
-interface Props extends TreeItemProps {
+interface Props<T = Record<string, any>> extends TreeItemProps<T> {
   id: UniqueIdentifier;
+  item?: FlattenedItem<T>;
 }
 
 /**
@@ -22,9 +24,14 @@ const animateLayoutChanges: AnimateLayoutChanges = ({isSorting, wasDragging}) =>
 /**
  * ⭐️ SortableTreeItem 包装组件
  * 将 @dnd-kit/sortable 的 useSortable 状态（transform, transition, attributes, listeners）
- * 注入到底层无状态的 TreeItem UI 组件中。
+ * 注入到底层 TreeItem UI 组件中。
  */
-export function SortableTreeItem({id, depth, ...props}: Props) {
+export function SortableTreeItem<T = Record<string, any>>({
+  id,
+  depth,
+  item,
+  ...props
+}: Props<T>) {
   const {
     attributes,           // 无障碍属性 (aria 标签等)
     isDragging,           // 当前项是否正处于被拖拽状态 (用于渲染半透明 ghost 占位)
@@ -51,6 +58,7 @@ export function SortableTreeItem({id, depth, ...props}: Props) {
       wrapperRef={setDroppableNodeRef}
       style={style}
       depth={depth}
+      item={item}
       ghost={isDragging}
       disableSelection={iOS}
       disableInteraction={isSorting}

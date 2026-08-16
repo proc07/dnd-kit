@@ -33,8 +33,8 @@ function getDragDepth(offset: number, indentationWidth: number) {
  * @param maxDepthLimit 最大层级深度限制 (例如：2层嵌套传 1，即只允许 0 和 1)
  * @param depthSpan 被拖拽项自身携带的子树最大深度（防止携带子节点的父项被嵌套过深）
  */
-export function getProjection(
-  items: FlattenedItem[],
+export function getProjection<T = Record<string, any>>(
+  items: FlattenedItem<T>[],
   activeId: UniqueIdentifier,
   overId: UniqueIdentifier,
   dragOffset: number,
@@ -119,7 +119,7 @@ export function getProjection(
  * 计算某个位置能允许的最大深度：
  * 只能比上方相邻节点 (previousItem) 最多深 1 层；若上方没有节点，则只能在根层 (0)
  */
-function getMaxDepth({previousItem}: {previousItem?: FlattenedItem}) {
+function getMaxDepth<T = Record<string, any>>({previousItem}: {previousItem?: FlattenedItem<T>}) {
   if (previousItem) {
     return previousItem.depth + 1;
   }
@@ -131,7 +131,7 @@ function getMaxDepth({previousItem}: {previousItem?: FlattenedItem}) {
  * 计算某个位置允许的最小深度：
  * 如果下方有相邻节点 (nextItem)，当前项的深度不能小于它，以维持树的连贯性
  */
-function getMinDepth({nextItem}: {nextItem?: FlattenedItem}) {
+function getMinDepth<T = Record<string, any>>({nextItem}: {nextItem?: FlattenedItem<T>}) {
   if (nextItem) {
     return nextItem.depth;
   }
@@ -143,16 +143,16 @@ function getMinDepth({nextItem}: {nextItem?: FlattenedItem}) {
  * 递归将嵌套树形数据 (TreeItems) 拍平成线性一维列表 (FlattenedItem[])
  * 拍平后每个节点附带 parentId, depth(层级) 和 index(同级索引)
  */
-function flatten(
-  items: TreeItems,
+function flatten<T = Record<string, any>>(
+  items: TreeItems<T>,
   parentId: UniqueIdentifier | null = null,
   depth = 0
-): FlattenedItem[] {
-  return items.reduce<FlattenedItem[]>((acc, item, index) => {
+): FlattenedItem<T>[] {
+  return items.reduce<FlattenedItem<T>[]>((acc, item, index) => {
     return [
       ...acc,
-      {...item, parentId, depth, index},
-      ...flatten(item.children, item.id, depth + 1),
+      {...item, parentId, depth, index, children: item.children ?? []},
+      ...flatten(item.children ?? [], item.id, depth + 1),
     ];
   }, []);
 }
@@ -160,46 +160,49 @@ function flatten(
 /**
  * 拍平树结构对外入口
  */
-export function flattenTree(items: TreeItems): FlattenedItem[] {
+export function flattenTree<T = Record<string, any>>(items: TreeItems<T>): FlattenedItem<T>[] {
   return flatten(items);
 }
 
 /**
  * ⭐️ 逆向重构：将拖拽排序后的一维扁平列表 (FlattenedItem[]) 还原为多叉树形结构 (TreeItems)
  */
-export function buildTree(flattenedItems: FlattenedItem[]): TreeItems {
-  const root: TreeItem = {id: 'root', children: []};
-  const nodes: Record<string, TreeItem> = {[root.id]: root};
+export function buildTree<T = Record<string, any>>(flattenedItems: FlattenedItem<T>[]): TreeItems<T> {
+  const root: TreeItem<T> = {id: 'root', children: []} as TreeItem<T>;
+  const nodes: Record<string, TreeItem<T>> = {[root.id]: root};
   const items = flattenedItems.map((item) => ({...item, children: []}));
 
   for (const item of items) {
-    const {id, children} = item;
+    const {id} = item;
     const parentId = item.parentId ?? root.id;
     const parent = nodes[parentId] ?? findItem(items, parentId);
 
-    nodes[id] = {id, children};
+    nodes[id] = item as TreeItem<T>;
     if (parent) {
-      parent.children.push(item);
+      if (!parent.children) {
+        parent.children = [];
+      }
+      parent.children.push(item as TreeItem<T>);
     }
   }
 
-  return root.children;
+  return root.children ?? [];
 }
 
 /**
  * 浅层查找某项
  */
-export function findItem(items: TreeItem[], itemId: UniqueIdentifier) {
+export function findItem<T = Record<string, any>>(items: TreeItem<T>[], itemId: UniqueIdentifier) {
   return items.find(({id}) => id === itemId);
 }
 
 /**
  * 深度递归查找树中的某项
  */
-export function findItemDeep(
-  items: TreeItems,
+export function findItemDeep<T = Record<string, any>>(
+  items: TreeItems<T>,
   itemId: UniqueIdentifier
-): TreeItem | undefined {
+): TreeItem<T> | undefined {
   for (const item of items) {
     const {id, children} = item;
 
@@ -207,7 +210,7 @@ export function findItemDeep(
       return item;
     }
 
-    if (children.length) {
+    if (children && children.length) {
       const child = findItemDeep(children, itemId);
 
       if (child) {
@@ -222,15 +225,15 @@ export function findItemDeep(
 /**
  * 从树形结构中递归删除指定 ID 的节点及其所有子节点
  */
-export function removeItem(items: TreeItems, id: UniqueIdentifier): TreeItems {
-  const newItems = [];
+export function removeItem<T = Record<string, any>>(items: TreeItems<T>, id: UniqueIdentifier): TreeItems<T> {
+  const newItems: TreeItem<T>[] = [];
 
   for (const item of items) {
     if (item.id === id) {
       continue;
     }
 
-    if (item.children.length) {
+    if (item.children && item.children.length) {
       item.children = removeItem(item.children, id);
     }
 
@@ -243,19 +246,19 @@ export function removeItem(items: TreeItems, id: UniqueIdentifier): TreeItems {
 /**
  * 递归设置树中某个节点的属性值 (如展开/折叠状态 collapsed)
  */
-export function setProperty<T extends keyof TreeItem>(
-  items: TreeItems,
+export function setProperty<T = Record<string, any>, K extends keyof TreeItem<T> = keyof TreeItem<T>>(
+  items: TreeItems<T>,
   id: UniqueIdentifier,
-  property: T,
-  setter: (value: TreeItem[T]) => TreeItem[T]
-): TreeItems {
+  property: K,
+  setter: (value: TreeItem<T>[K]) => TreeItem<T>[K]
+): TreeItems<T> {
   for (const item of items) {
     if (item.id === id) {
       item[property] = setter(item[property]);
       continue;
     }
 
-    if (item.children.length) {
+    if (item.children && item.children.length) {
       item.children = setProperty(item.children, id, property, setter);
     }
   }
@@ -266,9 +269,9 @@ export function setProperty<T extends keyof TreeItem>(
 /**
  * 统计子节点总数（递归）
  */
-function countChildren(items: TreeItem[], count = 0): number {
+function countChildren<T = Record<string, any>>(items: TreeItem<T>[], count = 0): number {
   return items.reduce((acc, {children}) => {
-    if (children.length) {
+    if (children && children.length) {
       return countChildren(children, acc + 1);
     }
 
@@ -279,25 +282,25 @@ function countChildren(items: TreeItem[], count = 0): number {
 /**
  * 获取指定节点下所有后代节点的总个数
  */
-export function getChildCount(items: TreeItems, id: UniqueIdentifier) {
+export function getChildCount<T = Record<string, any>>(items: TreeItems<T>, id: UniqueIdentifier) {
   const item = findItemDeep(items, id);
 
-  return item ? countChildren(item.children) : 0;
+  return item && item.children ? countChildren(item.children) : 0;
 }
 
 /**
  * ⭐️ 关键过滤函数：在渲染和拖拽投影时，隐藏已折叠节点的子节点或正在拖拽节点的子节点
  * 避免在拖拽父节点时，子节点依然在列表中占位导致位置错乱
  */
-export function removeChildrenOf(
-  items: FlattenedItem[],
+export function removeChildrenOf<T = Record<string, any>>(
+  items: FlattenedItem<T>[],
   ids: UniqueIdentifier[]
 ) {
   const excludeParentIds = [...ids];
 
   return items.filter((item) => {
     if (item.parentId && excludeParentIds.includes(item.parentId)) {
-      if (item.children.length) {
+      if (item.children && item.children.length) {
         excludeParentIds.push(item.id);
       }
       return false;
@@ -310,13 +313,13 @@ export function removeChildrenOf(
 /**
  * 递归计算某个树节点内部子树的最大深度跨度
  */
-function getMaxChildDepth(items: TreeItem[], currentDepth = 0): number {
+function getMaxChildDepth<T = Record<string, any>>(items: TreeItem<T>[], currentDepth = 0): number {
   if (!items.length) {
     return currentDepth;
   }
   return Math.max(
     ...items.map((item) =>
-      item.children.length
+      item.children && item.children.length
         ? getMaxChildDepth(item.children, currentDepth + 1)
         : currentDepth + 1
     )
@@ -327,9 +330,9 @@ function getMaxChildDepth(items: TreeItem[], currentDepth = 0): number {
  * 获取指定节点自身携带的子树层级深度跨度
  * 例如：如果节点有直接子节点，跨度为 1；如果有孙子节点，跨度为 2；若无子节点，跨度为 0
  */
-export function getItemDepthSpan(items: TreeItems, id: UniqueIdentifier): number {
+export function getItemDepthSpan<T = Record<string, any>>(items: TreeItems<T>, id: UniqueIdentifier): number {
   const item = findItemDeep(items, id);
-  if (!item || !item.children.length) {
+  if (!item || !item.children || !item.children.length) {
     return 0;
   }
   return getMaxChildDepth(item.children, 1);

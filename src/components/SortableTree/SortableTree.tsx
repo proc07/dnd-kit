@@ -1,4 +1,5 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
+import type {ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {
   DndContext,
@@ -12,7 +13,6 @@ import {
   defaultDropAnimation,
 } from '@dnd-kit/core';
 import type {
-  Announcements,
   DragStartEvent,
   DragMoveEvent,
   DragEndEvent,
@@ -39,7 +39,7 @@ import {
   removeChildrenOf,
   setProperty,
 } from './utilities';
-import type {FlattenedItem, TreeItems} from './types';
+import type {FlattenedItem, RenderItemParams, TreeItems} from './types';
 import {SortableTreeItem} from './components';
 import {initialTreeItems} from './constants';
 
@@ -79,39 +79,37 @@ const dropAnimationConfig: DropAnimation = {
 };
 
 /**
- * SortableTree 组件属性定义
+ * SortableTree 组件属性定义 (支持泛型自定义业务数据类型)
  */
-export interface SortableTreeProps {
-  collapsible?: boolean;                   // 是否支持展开/折叠
-  defaultItems?: TreeItems;                // 初始树形数据
-  indentationWidth?: number;               // 每一级缩进的像素宽度 (默认 50px)
-  indicator?: boolean;                     // 是否启用放置指示线模式 (Drop Indicator)
-  removable?: boolean;                     // 是否显示并启用删除按钮
-  maxDepth?: number;                       // 最大允许的嵌套深度 (例如：1 表示最多 2 层嵌套)
-  onItemsChange?: (items: TreeItems) => void; // 树形结构发生变动时的回调
+export interface SortableTreeProps<T = Record<string, any>> {
+  collapsible?: boolean;                         // 是否支持展开/折叠
+  defaultItems?: TreeItems<T>;                   // 初始树形数据
+  indentationWidth?: number;                     // 每一级缩进的像素宽度 (默认 50px)
+  indicator?: boolean;                           // 是否启用放置指示线模式 (Drop Indicator)
+  removable?: boolean;                           // 是否显示并启用删除按钮 (仅在默认 UI 下生效)
+  maxDepth?: number;                             // 最大允许的嵌套深度 (例如：1 表示最多 2 层嵌套)
+  renderItem?: (params: RenderItemParams<T>) => ReactNode; // ⭐️ 自定义节点 UI 渲染插槽
+  onItemsChange?: (items: TreeItems<T>) => void; // 树形结构发生变动时的回调
 }
 
 /**
- * ⭐️ 核心树形排序容器组件
+ * ⭐️ 核心通用树形排序容器组件
  */
-export function SortableTree({
+export function SortableTree<T = Record<string, any>>({
   collapsible = true,
-  defaultItems = initialTreeItems,
+  defaultItems = initialTreeItems as unknown as TreeItems<T>,
   indicator = false,
   indentationWidth = 50,
   removable = true,
   maxDepth,
+  renderItem,
   onItemsChange,
-}: SortableTreeProps) {
+}: SortableTreeProps<T>) {
   // 1. 状态定义：树形数据、当前拖拽项 ID、当前悬停目标项 ID、水平拖拽偏移量
-  const [items, setItems] = useState<TreeItems>(() => defaultItems);
+  const [items, setItems] = useState<TreeItems<T>>(() => defaultItems);
   const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
   const [overId, setOverId] = useState<UniqueIdentifier | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
-  const [currentPosition, setCurrentPosition] = useState<{
-    parentId: UniqueIdentifier | null;
-    overId: UniqueIdentifier;
-  } | null>(null);
 
   // 外部 defaultItems 变动时同步更新
   useEffect(() => {
@@ -123,7 +121,7 @@ export function SortableTree({
     const flattenedTree = flattenTree(items);
     const collapsedItems = flattenedTree.reduce<UniqueIdentifier[]>(
       (acc, {children, collapsed, id}) =>
-        collapsed && children.length ? [...acc, id] : acc,
+        collapsed && children && children.length ? [...acc, id] : acc,
       []
     );
 
@@ -172,28 +170,8 @@ export function SortableTree({
     ? flattenedItems.find(({id}) => id === activeId)
     : null;
 
-  // 8. 屏幕阅读器无障碍播报配置
-  const announcements: Announcements = {
-    onDragStart({active}) {
-      return `Picked up ${active.id}.`;
-    },
-    onDragMove({active, over}) {
-      return getMovementAnnouncement('onDragMove', active.id, over?.id);
-    },
-    onDragOver({active, over}) {
-      return getMovementAnnouncement('onDragOver', active.id, over?.id);
-    },
-    onDragEnd({active, over}) {
-      return getMovementAnnouncement('onDragEnd', active.id, over?.id);
-    },
-    onDragCancel({active}) {
-      return `Moving was cancelled. ${active.id} was dropped in its original position.`;
-    },
-  };
-
   return (
     <DndContext
-      accessibility={{announcements}}
       sensors={sensors}
       collisionDetection={closestCenter}
       measuring={measuring}
@@ -205,24 +183,28 @@ export function SortableTree({
     >
       <SortableContext items={sortedIds} strategy={verticalListSortingStrategy}>
         <div style={{display: 'flex', flexDirection: 'column', gap: 4, width: '100%'}}>
-          {flattenedItems.map(({id, children, collapsed, depth}) => (
-            <SortableTreeItem
-              key={id}
-              id={id}
-              value={String(id)}
-              // 若当前项正处于拖拽中且有投影，则显示投影计算出的实时深度；否则显示实际深度
-              depth={id === activeId && projected ? projected.depth : depth}
-              indentationWidth={indentationWidth}
-              indicator={indicator}
-              collapsed={Boolean(collapsed && children.length)}
-              onCollapse={
-                collapsible && children.length
-                  ? () => handleCollapse(id)
-                  : undefined
-              }
-              onRemove={removable ? () => handleRemove(id) : undefined}
-            />
-          ))}
+          {flattenedItems.map((item) => {
+            const {id, children, collapsed, depth} = item;
+            return (
+              <SortableTreeItem<T>
+                key={id}
+                id={id}
+                item={item}
+                // 若当前项正处于拖拽中且有投影，则显示投影计算出的实时深度；否则显示实际深度
+                depth={id === activeId && projected ? projected.depth : depth}
+                indentationWidth={indentationWidth}
+                indicator={indicator}
+                renderItem={renderItem}
+                collapsed={Boolean(collapsed && children && children.length)}
+                onCollapse={
+                  collapsible && children && children.length
+                    ? () => handleCollapse(id)
+                    : undefined
+                }
+                onRemove={removable ? () => handleRemove(id) : undefined}
+              />
+            );
+          })}
         </div>
 
         {/* ⭐️ DragOverlay: 鼠标指针跟随的拖拽悬浮副本 */}
@@ -232,12 +214,13 @@ export function SortableTree({
             modifiers={indicator ? [adjustTranslate] : undefined}
           >
             {activeId && activeItem ? (
-              <SortableTreeItem
+              <SortableTreeItem<T>
                 id={activeId}
+                item={activeItem}
                 depth={activeItem.depth}
                 clone
                 childCount={getChildCount(items, activeId) + 1}
-                value={activeId.toString()}
+                renderItem={renderItem}
                 indentationWidth={indentationWidth}
               />
             ) : null}
@@ -254,16 +237,6 @@ export function SortableTree({
   function handleDragStart({active: {id: activeId}}: DragStartEvent) {
     setActiveId(activeId);
     setOverId(activeId);
-
-    const activeItem = flattenedItems.find(({id}) => id === activeId);
-
-    if (activeItem) {
-      setCurrentPosition({
-        parentId: activeItem.parentId,
-        overId: activeId,
-      });
-    }
-
     document.body.style.setProperty('cursor', 'grabbing');
   }
 
@@ -289,7 +262,7 @@ export function SortableTree({
 
     if (projected && over) {
       const {depth, parentId} = projected;
-      const clonedItems: FlattenedItem[] = JSON.parse(
+      const clonedItems: FlattenedItem<T>[] = JSON.parse(
         JSON.stringify(flattenTree(items))
       );
       const overIndex = clonedItems.findIndex(({id}) => id === over.id);
@@ -325,8 +298,6 @@ export function SortableTree({
     setOverId(null);
     setActiveId(null);
     setOffsetLeft(0);
-    setCurrentPosition(null);
-
     document.body.style.setProperty('cursor', '');
   }
 
@@ -346,68 +317,6 @@ export function SortableTree({
     const updated = setProperty(items, id, 'collapsed', (value) => !value);
     setItems(updated);
     onItemsChange?.(updated);
-  }
-
-  /**
-   * 生成屏幕阅读器辅助语音播报内容
-   */
-  function getMovementAnnouncement(
-    eventName: string,
-    activeId: UniqueIdentifier,
-    overId?: UniqueIdentifier
-  ) {
-    if (overId && projected) {
-      if (eventName !== 'onDragEnd') {
-        if (
-          currentPosition &&
-          projected.parentId === currentPosition.parentId &&
-          overId === currentPosition.overId
-        ) {
-          return;
-        } else {
-          setCurrentPosition({
-            parentId: projected.parentId,
-            overId,
-          });
-        }
-      }
-
-      const clonedItems: FlattenedItem[] = JSON.parse(
-        JSON.stringify(flattenTree(items))
-      );
-      const overIndex = clonedItems.findIndex(({id}) => id === overId);
-      const activeIndex = clonedItems.findIndex(({id}) => id === activeId);
-      const sortedItems = arrayMove(clonedItems, activeIndex, overIndex);
-
-      const previousItem = sortedItems[overIndex - 1];
-
-      let announcement;
-      const movedVerb = eventName === 'onDragEnd' ? 'dropped' : 'moved';
-      const nestedVerb = eventName === 'onDragEnd' ? 'dropped' : 'nested';
-
-      if (!previousItem) {
-        const nextItem = sortedItems[overIndex + 1];
-        announcement = `${activeId} was ${movedVerb} before ${nextItem.id}.`;
-      } else {
-        if (projected.depth > previousItem.depth) {
-          announcement = `${activeId} was ${nestedVerb} under ${previousItem.id}.`;
-        } else {
-          let previousSibling: FlattenedItem | undefined = previousItem;
-          while (previousSibling && projected.depth < previousSibling.depth) {
-            const parentId: UniqueIdentifier | null = previousSibling.parentId;
-            previousSibling = sortedItems.find(({id}) => id === parentId);
-          }
-
-          if (previousSibling) {
-            announcement = `${activeId} was ${movedVerb} after ${previousSibling.id}.`;
-          }
-        }
-      }
-
-      return announcement;
-    }
-
-    return;
   }
 }
 
