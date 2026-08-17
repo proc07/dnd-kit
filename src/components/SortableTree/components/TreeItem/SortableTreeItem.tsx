@@ -16,10 +16,10 @@ interface Props<T = Record<string, any>> extends TreeItemProps<T> {
 }
 
 /**
- * 布局动画变化策略：在非排序和非拖拽状态下才触发常规布局动画，避免拖拽过程中的重绘抖动
+ * 布局动画变化策略：禁用持久的布局变换动画，确保拖拽放置后所有节点立刻恢复无 transform 的纯净 DOM 真实布局，
+ * 彻底杜绝拖拽后 DevTools 元素定位偏移、坐标错位或二次拖拽失效的问题。
  */
-const animateLayoutChanges: AnimateLayoutChanges = ({isSorting, wasDragging}) =>
-  isSorting || wasDragging ? false : true;
+const animateLayoutChanges: AnimateLayoutChanges = () => false;
 
 /**
  * ⭐️ SortableTreeItem 包装组件
@@ -46,10 +46,11 @@ export function SortableTreeItem<T = Record<string, any>>({
     animateLayoutChanges,
   });
 
-  // 将 transform 平移量转换为 CSS transform 字符串
+  // ⭐️ 核心防漂移保障：仅在当前项处于被拖拽或排序过程中时才应用 transform / transition；
+  // 拖拽放置后或静止状态下严格为 undefined，确保真实 DOM 布局与视图 100% 物理对齐，绝无任何残留位移。
   const style: CSSProperties = {
-    transform: CSS.Translate.toString(transform),
-    transition,
+    transform: isDragging || isSorting ? CSS.Translate.toString(transform) : undefined,
+    transition: isSorting ? transition : undefined,
   };
 
   return (

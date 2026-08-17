@@ -40,7 +40,7 @@ import {
   setProperty,
 } from './utilities';
 import type {FlattenedItem, RenderItemParams, TreeItems} from './types';
-import {SortableTreeItem} from './components';
+import {SortableTreeItem, TreeItem} from './components';
 import {initialTreeItems} from './constants';
 
 /**
@@ -207,19 +207,19 @@ export function SortableTree<T = Record<string, any>>({
           })}
         </div>
 
-        {/* ⭐️ DragOverlay: 鼠标指针跟随的拖拽悬浮副本 */}
+        {/* ⭐️ DragOverlay: 鼠标指针跟随的拖拽悬浮副本 (使用 dropAnimation={null} 瞬时放置，杜绝快速拖拽+自动滚动场景下的幽灵节点干扰) */}
         {createPortal(
           <DragOverlay
-            dropAnimation={dropAnimationConfig}
+            dropAnimation={null}
             modifiers={indicator ? [adjustTranslate] : undefined}
           >
             {activeId && activeItem ? (
-              <SortableTreeItem<T>
-                id={activeId}
+              <TreeItem<T>
                 item={activeItem}
                 depth={activeItem.depth}
                 clone
                 childCount={getChildCount(items, activeId) + 1}
+                value={String(activeId)}
                 renderItem={renderItem}
                 indentationWidth={indentationWidth}
               />
@@ -299,6 +299,15 @@ export function SortableTree<T = Record<string, any>>({
     setActiveId(null);
     setOffsetLeft(0);
     document.body.style.setProperty('cursor', '');
+
+    // ⭐️ 修复快速拖拽 + AutoScroll 场景下整个页面视觉偏移的问题：
+    // 根因：dnd-kit AutoScroller 在拖拽结束时可能仍有残余滚动帧未提交，
+    // 导致浏览器合成器线程（Compositor）持有的 scroll offset
+    // 与主线程渲染位置发生撕裂（tearing），整个页面元素视觉位置均偏移。
+    // 修复：在下一帧用 scrollTo 当前位置强制合成器将滚动偏移提交同步到主线程。
+    requestAnimationFrame(() => {
+      window.scrollTo({top: window.scrollY, left: window.scrollX, behavior: 'instant' as ScrollBehavior});
+    });
   }
 
   /**
